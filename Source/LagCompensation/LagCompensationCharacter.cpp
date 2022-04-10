@@ -1,6 +1,10 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "LagCompensationCharacter.h"
+
+#include "AudioWaveFormatParser.h"
+#include "DrawDebugHelpers.h"
+#include "EngineUtils.h"
 #include "LagCompensationProjectile.h"
 #include "Animation/AnimInstance.h"
 #include "Camera/CameraComponent.h"
@@ -8,16 +12,20 @@
 #include "Components/InputComponent.h"
 #include "GameFramework/InputSettings.h"
 #include "HeadMountedDisplayFunctionLibrary.h"
+#include "LagCompensationPlayerController.h"
+#include "LCCharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "MotionControllerComponent.h"
 #include "XRMotionControllerBase.h" // for FXRMotionControllerBase::RightHandSourceId
+#include "GameFramework/CharacterMovementComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFPChar, Warning, All);
 
 //////////////////////////////////////////////////////////////////////////
 // ALagCompensationCharacter
 
-ALagCompensationCharacter::ALagCompensationCharacter()
+ALagCompensationCharacter::ALagCompensationCharacter(const FObjectInitializer& ObjectInitializer)
+: Super(ObjectInitializer.SetDefaultSubobjectClass<ULCCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(55.f, 96.0f);
@@ -103,6 +111,48 @@ void ALagCompensationCharacter::BeginPlay()
 		VR_Gun->SetHiddenInGame(true, true);
 		Mesh1P->SetHiddenInGame(false, true);
 	}
+	
+	GetWorldTimerManager().SetTimer(AutoShootTimer, this, &ALagCompensationCharacter::OnFire, 2.f, true);
+}
+
+void ALagCompensationCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	Super::EndPlay(EndPlayReason);
+
+	GetWorldTimerManager().ClearTimer(AutoShootTimer);
+	AutoShootTimer.Invalidate();
+}
+
+void ALagCompensationCharacter::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	//UE_LOG(LogTemp, Log, TEXT("%s: Mode: %s"), *GetName(), );
+	if(GetOwner() ? GetOwner()->GetLocalRole() : GetLocalRole() == ROLE_AutonomousProxy)
+	{
+		UCharacterMovementComponent* MovementComponent = Cast<UCharacterMovementComponent>(GetMovementComponent());
+		FNetworkPredictionData_Client_Character* Data = MovementComponent->GetPredictionData_Client_Character();
+		for (auto SavedMove : Data->SavedMoves)
+		{
+			//PrintSavedMove(SavedMove);
+			DrawDebugMove(SavedMove);
+		}
+	}
+}
+
+void ALagCompensationCharacter::PrintSavedMove(FSavedMovePtr Move)
+{
+	UE_LOG(LogTemp, Log, TEXT("%s: TimeStamp: %f, \n DeltaTime: %f, \n StartLocation: %s"),\
+	*GetName(),
+	Move->TimeStamp,
+	Move->DeltaTime,
+	*Move->StartLocation.ToString()
+	);
+}
+
+void ALagCompensationCharacter::DrawDebugMove(FSavedMovePtr Move)
+{
+	DrawDebugSphere(GetWorld(), Move->StartLocation, 5.f, 12, FColor::Magenta, false, 10.f);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -120,9 +170,6 @@ void ALagCompensationCharacter::SetupPlayerInputComponent(class UInputComponent*
 	// Bind fire event
 	PlayerInputComponent->BindAction("Fire", IE_Pressed, this, &ALagCompensationCharacter::OnFire);
 
-	// Enable touchscreen input
-	EnableTouchscreenMovement(PlayerInputComponent);
-
 	PlayerInputComponent->BindAction("ResetVR", IE_Pressed, this, &ALagCompensationCharacter::OnResetVR);
 
 	// Bind movement events
@@ -136,6 +183,36 @@ void ALagCompensationCharacter::SetupPlayerInputComponent(class UInputComponent*
 	PlayerInputComponent->BindAxis("TurnRate", this, &ALagCompensationCharacter::TurnAtRate);
 	PlayerInputComponent->BindAxis("LookUp", this, &APawn::AddControllerPitchInput);
 	PlayerInputComponent->BindAxis("LookUpRate", this, &ALagCompensationCharacter::LookUpAtRate);
+}
+
+bool ALagCompensationCharacter::GetPositionForTime(float Time, FVector& OutPosition)
+{
+	TArray<FSavedPosition> Positions = SavedMoves;
+	UE_LOG(LogTemp, Log, TEXT("%s: Time is %f"), *GetName(), Time);
+	float TargetTime = GetWorld()->GetTimeSeconds() - Time;
+	
+	if(Positions.Num() <= 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("%s: No SavedMoves"), *GetName());
+		return false;
+	}
+	
+	//Time we are looking for is 
+	for ( int i = Positions.Num() - 1; i > 0; --i)
+	{
+			if(Positions[i].Time > TargetTime)
+			{
+				continue;
+			}
+			if(Positions[i].Time <= TargetTime)
+			{
+				OutPosition = Positions[i].Position;
+				UE_LOG(LogTemp, Log, TEXT("%s: i = %d"), *GetName(), i);
+				return true;
+			}
+		
+	}
+	return false;
 }
 
 void ALagCompensationCharacter::OnFire()
@@ -154,20 +231,30 @@ void ALagCompensationCharacter::OnFire()
 			}
 			else
 			{
-				const FRotator SpawnRotation = GetControlRotation();
-				// MuzzleOffset is in camera space, so transform it to world space before offsetting from the character location to find the final muzzle position
-				const FVector StartLocation = ((FP_MuzzleLocation != nullptr) ? FP_MuzzleLocation->GetComponentLocation() : GetActorLocation()) + SpawnRotation.RotateVector(GunOffset);
-				const FVector EndLocation = StartLocation.ForwardVector * 1000.f;
-
-				const FName TraceTag("LineTraceTag");
-                
-                World->DebugDrawTraceTag = TraceTag;
-                
-                FCollisionQueryParams CollisionParams = FCollisionQueryParams::DefaultQueryParam;
-                CollisionParams.TraceTag = TraceTag;
-				FHitResult OutHit;
-				GetWorld()->LineTraceSingleByChannel(OutHit, StartLocation, EndLocation, ECC_Visibility, CollisionParams);
+				ALagCompensationPlayerController* LCPC = GetOwner() ? Cast<ALagCompensationPlayerController>(GetController()) : NULL;
+				float PredictionTime = LCPC ? LCPC->GetPredictionTime() : 0.f;
+				UE_LOG(LogTemp, Log, TEXT("%s: %e"), *GetName(), PredictionTime);
+				float CurrentClientTime = GetWorld()->GetTimeSeconds();
 				
+				if(GetLocalRole() == ROLE_AutonomousProxy)
+				{
+					OnFire_Server(PredictionTime);
+				}
+				
+				switch( GetLocalRole() )
+				{
+				case ROLE_Authority:
+					UE_LOG(LogTemp, Log, TEXT("%s: Role is Authority"), *GetName());
+					return;
+				case ROLE_AutonomousProxy:
+					UE_LOG(LogTemp, Log, TEXT("%s: Role is AutonomousProxy"), *GetName());
+					return;
+				case ROLE_SimulatedProxy:
+					UE_LOG(LogTemp, Log, TEXT("%s: Role is SimulatedProxy"), *GetName());
+					return;
+				default:
+					return;
+				}
 			}
 		}
 	}
@@ -190,73 +277,70 @@ void ALagCompensationCharacter::OnFire()
 	}
 }
 
+void ALagCompensationCharacter::OnFire_Server_Implementation(float ClientFireTime)
+{
+	UWorld* const World = GetWorld();
+	if (World != nullptr)
+	{
+		float CurrentTime = GetWorld()->GetTimeSeconds();
+		UE_LOG(LogTemp, Log, TEXT("%s: TimeStamp5: Client fired in %f \n TimeStamp5: Now is %f"), *GetName(), CurrentTime - ClientFireTime, CurrentTime);
+
+		const FRotator SpawnRotation = GetControlRotation();
+		// MuzzleOffset is in camera space, so transform it to world space before offsetting from the character location to find the final muzzle position
+		const FVector StartLocation = ((FirstPersonCameraComponent != nullptr) ? FirstPersonCameraComponent->GetComponentLocation() : GetActorLocation()) + SpawnRotation.RotateVector(GunOffset);
+		FVector_NetQuantize EndLocation = StartLocation + (SpawnRotation.Vector() * 5000.f);
+		
+		const FName TraceTag("LineTraceTag");
+		World->DebugDrawTraceTag = TraceTag;
+                
+		FCollisionQueryParams CollisionParams = FCollisionQueryParams::DefaultQueryParam;
+		CollisionParams.TraceTag = TraceTag;
+		FHitResult OutHit;
+				
+		TArray<AActor*> ActorsToIgnore;
+		ActorsToIgnore.Empty();
+		//GetWorld()->LineTraceSingleByChannel(OutHit, StartLocation, EndLocation, ECC_Visibility, CollisionParams);
+		bool bHitOccured = UKismetSystemLibrary::LineTraceSingle(GetWorld(), StartLocation, EndLocation, ETraceTypeQuery::TraceTypeQuery1,
+			false, ActorsToIgnore, EDrawDebugTrace::ForDuration, OutHit, true);
+
+		if(bHitOccured)
+		{
+			EndLocation = OutHit.Location;
+		}
+
+		DrawDebugSphere(GetWorld(), OutHit.Location, 10.f, 12, FColor::Orange, false, 1.f);
+
+		FVector ClientViewPosition;
+		//ALagCompensationCharacter* HitCandidate;
+		//get the rewind position of a player
+		bool bPositionFound = false;
+		for (TActorIterator<ALagCompensationCharacter> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+		{
+			ALagCompensationCharacter* LCChar = *ActorItr;
+			if(LCChar->IsLocallyControlled()) continue; //skip local controller
+			bPositionFound = LCChar->GetPositionForTime(ClientFireTime, ClientViewPosition);
+			if(bPositionFound)
+			{
+				UCapsuleComponent* ActorCapsule = LCChar->GetCapsuleComponent();
+				//LCChar->SetActorLocation(ClientViewPosition);
+				
+				DrawDebugCapsule(GetWorld(), ActorCapsule->GetComponentLocation(),
+					ActorCapsule->GetScaledCapsuleHalfHeight(), ActorCapsule->GetScaledCapsuleRadius(),
+			ActorCapsule->GetComponentRotation().Quaternion(), FColor::Black, true);
+				
+				DrawDebugCapsule(GetWorld(), ClientViewPosition,
+					ActorCapsule->GetScaledCapsuleHalfHeight(), ActorCapsule->GetScaledCapsuleRadius(),
+					ActorCapsule->GetComponentRotation().Quaternion(), FColor::White, true);
+			}
+						
+		}
+	}
+}
+
 void ALagCompensationCharacter::OnResetVR()
 {
 	UHeadMountedDisplayFunctionLibrary::ResetOrientationAndPosition();
 }
-
-void ALagCompensationCharacter::BeginTouch(const ETouchIndex::Type FingerIndex, const FVector Location)
-{
-	if (TouchItem.bIsPressed == true)
-	{
-		return;
-	}
-	if ((FingerIndex == TouchItem.FingerIndex) && (TouchItem.bMoved == false))
-	{
-		OnFire();
-	}
-	TouchItem.bIsPressed = true;
-	TouchItem.FingerIndex = FingerIndex;
-	TouchItem.Location = Location;
-	TouchItem.bMoved = false;
-}
-
-void ALagCompensationCharacter::EndTouch(const ETouchIndex::Type FingerIndex, const FVector Location)
-{
-	if (TouchItem.bIsPressed == false)
-	{
-		return;
-	}
-	TouchItem.bIsPressed = false;
-}
-
-//Commenting this section out to be consistent with FPS BP template.
-//This allows the user to turn without using the right virtual joystick
-
-//void ALagCompensationCharacter::TouchUpdate(const ETouchIndex::Type FingerIndex, const FVector Location)
-//{
-//	if ((TouchItem.bIsPressed == true) && (TouchItem.FingerIndex == FingerIndex))
-//	{
-//		if (TouchItem.bIsPressed)
-//		{
-//			if (GetWorld() != nullptr)
-//			{
-//				UGameViewportClient* ViewportClient = GetWorld()->GetGameViewport();
-//				if (ViewportClient != nullptr)
-//				{
-//					FVector MoveDelta = Location - TouchItem.Location;
-//					FVector2D ScreenSize;
-//					ViewportClient->GetViewportSize(ScreenSize);
-//					FVector2D ScaledDelta = FVector2D(MoveDelta.X, MoveDelta.Y) / ScreenSize;
-//					if (FMath::Abs(ScaledDelta.X) >= 4.0 / ScreenSize.X)
-//					{
-//						TouchItem.bMoved = true;
-//						float Value = ScaledDelta.X * BaseTurnRate;
-//						AddControllerYawInput(Value);
-//					}
-//					if (FMath::Abs(ScaledDelta.Y) >= 4.0 / ScreenSize.Y)
-//					{
-//						TouchItem.bMoved = true;
-//						float Value = ScaledDelta.Y * BaseTurnRate;
-//						AddControllerPitchInput(Value);
-//					}
-//					TouchItem.Location = Location;
-//				}
-//				TouchItem.Location = Location;
-//			}
-//		}
-//	}
-//}
 
 void ALagCompensationCharacter::MoveForward(float Value)
 {
@@ -286,19 +370,4 @@ void ALagCompensationCharacter::LookUpAtRate(float Rate)
 {
 	// calculate delta for this frame from the rate information
 	AddControllerPitchInput(Rate * BaseLookUpRate * GetWorld()->GetDeltaSeconds());
-}
-
-bool ALagCompensationCharacter::EnableTouchscreenMovement(class UInputComponent* PlayerInputComponent)
-{
-	if (FPlatformMisc::SupportsTouchInput() || GetDefault<UInputSettings>()->bUseMouseForTouch)
-	{
-		PlayerInputComponent->BindTouch(EInputEvent::IE_Pressed, this, &ALagCompensationCharacter::BeginTouch);
-		PlayerInputComponent->BindTouch(EInputEvent::IE_Released, this, &ALagCompensationCharacter::EndTouch);
-
-		//Commenting this out to be more consistent with FPS BP template.
-		//PlayerInputComponent->BindTouch(EInputEvent::IE_Repeat, this, &ALagCompensationCharacter::TouchUpdate);
-		return true;
-	}
-	
-	return false;
 }

@@ -3,6 +3,7 @@
 #include "LagCompensationGameMode.h"
 #include "LagCompensationHUD.h"
 #include "LagCompensationCharacter.h"
+#include "LagCompensationPlayerController.h"
 #include "UObject/ConstructorHelpers.h"
 
 ALagCompensationGameMode::ALagCompensationGameMode()
@@ -11,6 +12,7 @@ ALagCompensationGameMode::ALagCompensationGameMode()
 	// set default pawn class to our Blueprinted character
 	static ConstructorHelpers::FClassFinder<APawn> PlayerPawnClassFinder(TEXT("/Game/FirstPersonCPP/Blueprints/FirstPersonCharacter"));
 	DefaultPawnClass = PlayerPawnClassFinder.Class;
+	PlayerControllerClass = ALagCompensationPlayerController::StaticClass();
 
 	// use our custom HUD class
 	HUDClass = ALagCompensationHUD::StaticClass();

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "LagCompensationCharacter.generated.h"
 
 class UInputComponent;
@@ -13,6 +14,42 @@ class UCameraComponent;
 class UMotionControllerComponent;
 class UAnimMontage;
 class USoundBase;
+
+USTRUCT(BlueprintType)
+struct FSavedPosition
+{
+	GENERATED_USTRUCT_BODY()
+
+	FSavedPosition() : Position(FVector(0.f)), Rotation(FRotator(0.f)), Velocity(FVector(0.f)), bTeleported(false), bShotSpawned(false), Time(0.f), TimeStamp(0.f) {};
+
+	FSavedPosition(FVector InPos, FRotator InRot, FVector InVel, bool InTeleported, bool InShotSpawned, float InTime, float InTimeStamp) : Position(InPos), Rotation(InRot), Velocity(InVel), bTeleported(InTeleported), bShotSpawned(InShotSpawned), Time(InTime), TimeStamp(InTimeStamp) {};
+
+	/** Position of player at time Time. */
+	UPROPERTY()
+	FVector Position;
+
+	/** Rotation of player at time Time. */
+	UPROPERTY()
+	FRotator Rotation;
+
+	/** Keep velocity also for bots to use in realistic reaction time based aiming error model. */
+	UPROPERTY()
+	FVector Velocity;
+
+	/** true if teleport occurred getting to current position (so don't interpolate) */
+	UPROPERTY()
+	bool bTeleported;
+
+	/** true if shot was spawned at this position */
+	UPROPERTY()
+	bool bShotSpawned;
+
+	/** Current server world time when this position was updated. */
+	float Time;
+
+	/** Client timestamp associated with this position. */
+	float TimeStamp;
+};
 
 UCLASS(config=Game)
 class ALagCompensationCharacter : public ACharacter
@@ -51,11 +88,20 @@ class ALagCompensationCharacter : public ACharacter
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
 	UMotionControllerComponent* L_MotionController;
 
+	FTimerHandle AutoShootTimer;
+
 public:
-	ALagCompensationCharacter();
+	ALagCompensationCharacter(const FObjectInitializer& ObjectInitializer);
 
 protected:
-	virtual void BeginPlay();
+	virtual void BeginPlay() override;
+
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	virtual void Tick(float DeltaSeconds) override;
+	
+	void PrintSavedMove(FSavedMovePtr Move);
+	void DrawDebugMove(FSavedMovePtr Move);
 
 public:
 	/** Base turn rate, in deg/sec. Other scaling may affect final turn rate. */
@@ -86,10 +132,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Gameplay)
 	uint8 bUsingMotionControllers : 1;
 
+	UPROPERTY()
+	TArray<FSavedPosition> SavedMoves;
+
+	bool GetPositionForTime(float Time, FVector& OutPosition);
+
 protected:
 	
 	/** Fires a projectile. */
 	void OnFire();
+	
+	UFUNCTION(Server, Unreliable)
+	void OnFire_Server(float ClientFireTime);
+	void OnFire_Server_Implementation(float ClientFireTime);
 
 	/** Resets HMD orientation and position in VR. */
 	void OnResetVR();
@@ -112,31 +167,11 @@ protected:
 	 */
 	void LookUpAtRate(float Rate);
 
-	struct TouchData
-	{
-		TouchData() { bIsPressed = false;Location=FVector::ZeroVector;}
-		bool bIsPressed;
-		ETouchIndex::Type FingerIndex;
-		FVector Location;
-		bool bMoved;
-	};
-	void BeginTouch(const ETouchIndex::Type FingerIndex, const FVector Location);
-	void EndTouch(const ETouchIndex::Type FingerIndex, const FVector Location);
-	void TouchUpdate(const ETouchIndex::Type FingerIndex, const FVector Location);
-	TouchData	TouchItem;
 	
 protected:
 	// APawn interface
 	virtual void SetupPlayerInputComponent(UInputComponent* InputComponent) override;
 	// End of APawn interface
-
-	/* 
-	 * Configures input for touchscreen devices if there is a valid touch interface for doing so 
-	 *
-	 * @param	InputComponent	The input component pointer to bind controls to
-	 * @returns true if touch controls were enabled.
-	 */
-	bool EnableTouchscreenMovement(UInputComponent* InputComponent);
 
 public:
 	/** Returns Mesh1P subobject **/
