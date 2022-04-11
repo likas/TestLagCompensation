@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FakeCharacterCapsule.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "LagCompensationCharacter.generated.h"
@@ -148,8 +149,8 @@ protected:
 	void OnFire();
 	
 	UFUNCTION(Server, Unreliable)
-	void OnFire_Server(float ClientFireTime);
-	void OnFire_Server_Implementation(float ClientFireTime);
+	void OnFire_Server(float PredictionAmount, FVector StartLocation, FVector EndLocation);
+	void OnFire_Server_Implementation(float PredictionAmount, FVector StartLocation, FVector EndLocation);
 
 	/** Resets HMD orientation and position in VR. */
 	void OnResetVR();
@@ -172,6 +173,8 @@ protected:
 	 */
 	void LookUpAtRate(float Rate);
 
+	UPROPERTY()
+	AFakeCharacterCapsule* TestCapsule;
 	
 protected:
 	// APawn interface

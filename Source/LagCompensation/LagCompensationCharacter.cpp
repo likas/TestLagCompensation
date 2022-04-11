@@ -115,6 +115,9 @@ void ALagCompensationCharacter::BeginPlay()
 	}
 	
 	//GetWorldTimerManager().SetTimer(AutoShootTimer, this, &ALagCompensationCharacter::OnFire, 2.f, true);
+
+	AActor* TestCapsuleActor = GetWorld()->SpawnActor(AFakeCharacterCapsule::StaticClass());
+	TestCapsule = TestCapsuleActor? Cast<AFakeCharacterCapsule>(TestCapsuleActor) : nullptr;
 }
 
 void ALagCompensationCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -285,6 +288,8 @@ void ALagCompensationCharacter::OnFire()
             		//GetWorld()->LineTraceSingleByChannel(OutHit, StartLocation, EndLocation, ECC_Visibility, CollisionParams);
             		bool bHitOccured = UKismetSystemLibrary::LineTraceSingle(GetWorld(), StartLocation, EndLocation, ETraceTypeQuery::TraceTypeQuery1,
             			false, ActorsToIgnore, EDrawDebugTrace::ForDuration, OutHit, true);
+
+				//DrawDebugSphere(GetWorld(), OutHit.Location, 10.f, 12, FColor::Orange, false, 1.f);
 			
 				ALagCompensationPlayerController* LCPC = GetOwner() ? Cast<ALagCompensationPlayerController>(GetController()) : NULL;
 				float PredictionTime = LCPC ? LCPC->GetPredictionTime() : 0.f;
@@ -293,7 +298,7 @@ void ALagCompensationCharacter::OnFire()
 				
 				if(GetLocalRole() == ROLE_AutonomousProxy || GetLocalRole() == ROLE_Authority && IsLocallyControlled())
 				{
-					OnFire_Server(PredictionTime);
+					OnFire_Server(PredictionTime, StartLocation, EndLocation);
 				}
 				
 				switch( GetLocalRole() )
@@ -332,54 +337,58 @@ void ALagCompensationCharacter::OnFire()
 	}
 }
 
-void ALagCompensationCharacter::OnFire_Server_Implementation(float ClientFireTime)
+void ALagCompensationCharacter::OnFire_Server_Implementation(float PredictionAmount, FVector StartLocation, FVector EndLocation)
 {
 	UWorld* const World = GetWorld();
 	if (World != nullptr)
 	{
 		float CurrentTime = GetWorld()->GetTimeSeconds();
-		UE_LOG(LogTemp, Log, TEXT("%s: TimeStamp5: Client fired in %f \n TimeStamp5: Now is %f"), *GetName(), CurrentTime - ClientFireTime, CurrentTime);
-
-		const FRotator SpawnRotation = GetControlRotation();
-		// MuzzleOffset is in camera space, so transform it to world space before offsetting from the character location to find the final muzzle position
-		const FVector StartLocation = ((FirstPersonCameraComponent != nullptr) ? FirstPersonCameraComponent->GetComponentLocation() : GetActorLocation()) + SpawnRotation.RotateVector(GunOffset);
-		FVector_NetQuantize EndLocation = StartLocation + (SpawnRotation.Vector() * 5000.f);
-		
-		const FName TraceTag("LineTraceTag");
-		World->DebugDrawTraceTag = TraceTag;
-                
-		FCollisionQueryParams CollisionParams = FCollisionQueryParams::DefaultQueryParam;
-		CollisionParams.TraceTag = TraceTag;
-		FHitResult OutHit;
+		UE_LOG(LogTemp, Log, TEXT("%s: TimeStamp5: Client fired in %f \n TimeStamp5: Now is %f"), *GetName(), CurrentTime - PredictionAmount, CurrentTime);
 				
 		TArray<AActor*> ActorsToIgnore;
 		ActorsToIgnore.Empty();
 		//GetWorld()->LineTraceSingleByChannel(OutHit, StartLocation, EndLocation, ECC_Visibility, CollisionParams);
+		
 
-
-		DrawDebugSphere(GetWorld(), OutHit.Location, 10.f, 12, FColor::Orange, false, 1.f);
+		FHitResult OutHit;
 
 		FVector ClientViewPosition;
-		//ALagCompensationCharacter* HitCandidate;
+//		ALagCompensationCharacter* HitCandidate;
 		//get the rewind position of a player
 		bool bPositionFound = false;
 		for (TActorIterator<ALagCompensationCharacter> ActorItr(GetWorld()); ActorItr; ++ActorItr)
 		{
 			ALagCompensationCharacter* LCChar = *ActorItr;
-			bPositionFound = LCChar->GetPositionForTime(ClientFireTime, ClientViewPosition);
+			bPositionFound = LCChar->GetPositionForTime(PredictionAmount, ClientViewPosition);
 			if(bPositionFound)
 			{
 				FVector NormalPosition = LCChar->GetActorLocation();
 				UCapsuleComponent* ActorCapsule = LCChar->GetCapsuleComponent();
-				//LCChar->SetActorLocation(ClientViewPosition);
+				FVector NormalCapsuleLocation = ActorCapsule->GetComponentLocation();
+
+
+				TestCapsule->SetActorLocation(ClientViewPosition);
+
+				bool bHitOccured = UKismetSystemLibrary::LineTraceSingle(GetWorld(), StartLocation, EndLocation, ETraceTypeQuery::TraceTypeQuery1,
+			false, ActorsToIgnore, EDrawDebugTrace::ForDuration, OutHit, true);
 				
-				DrawDebugCapsule(GetWorld(), ActorCapsule->GetComponentLocation(),
-					ActorCapsule->GetScaledCapsuleHalfHeight(), ActorCapsule->GetScaledCapsuleRadius(),
-			ActorCapsule->GetComponentRotation().Quaternion(), FColor::Black, true);
 				
-				DrawDebugCapsule(GetWorld(), ClientViewPosition,
+
+				AFakeCharacterCapsule* HitCapsule = Cast<AFakeCharacterCapsule>(OutHit.Actor);
+				if(bHitOccured && IsValid(HitCapsule))
+				{
+					DrawDebugSphere(GetWorld(), OutHit.Location, 10.f, 12, FColor::Orange, true);
+					
+					DrawDebugCapsule(GetWorld(), NormalCapsuleLocation,
 					ActorCapsule->GetScaledCapsuleHalfHeight(), ActorCapsule->GetScaledCapsuleRadius(),
-					ActorCapsule->GetComponentRotation().Quaternion(), FColor::White, true);
+				ActorCapsule->GetComponentRotation().Quaternion(), FColor::Black, true);
+				
+					DrawDebugCapsule(GetWorld(), ClientViewPosition,
+						ActorCapsule->GetScaledCapsuleHalfHeight(), ActorCapsule->GetScaledCapsuleRadius(),
+						ActorCapsule->GetComponentRotation().Quaternion(), FColor::White, true);
+				}
+
+				TestCapsule->SetActorLocation(FVector(5000.f, 5000.f, 0.f));
 			}
 						
 		}
