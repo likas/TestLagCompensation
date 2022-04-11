@@ -90,6 +90,9 @@ class ALagCompensationCharacter : public ACharacter
 
 	FTimerHandle AutoShootTimer;
 
+	UPROPERTY()
+	float MaxSavedPositionAge;
+
 public:
 	ALagCompensationCharacter(const FObjectInitializer& ObjectInitializer);
 
@@ -137,6 +140,8 @@ public:
 
 	bool GetPositionForTime(float Time, FVector& OutPosition);
 
+	virtual void PositionUpdated();
+
 protected:
 	
 	/** Fires a projectile. */
@@ -178,6 +183,9 @@ public:
 	USkeletalMeshComponent* GetMesh1P() const { return Mesh1P; }
 	/** Returns FirstPersonCameraComponent subobject **/
 	UCameraComponent* GetFirstPersonCameraComponent() const { return FirstPersonCameraComponent; }
+
+	UFUNCTION(BlueprintCallable)
+	void AutoFire();
 
 };
 

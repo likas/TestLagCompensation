@@ -13,6 +13,8 @@ class ALagCompensationGameMode : public AGameModeBase
 
 public:
 	ALagCompensationGameMode();
+
+	virtual UClass* GetDefaultPawnClassForController_Implementation(AController* InController) override;
 };
 
 

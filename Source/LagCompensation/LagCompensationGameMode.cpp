@@ -4,6 +4,7 @@
 #include "LagCompensationHUD.h"
 #include "LagCompensationCharacter.h"
 #include "LagCompensationPlayerController.h"
+#include "GameFramework/SpectatorPawn.h"
 #include "UObject/ConstructorHelpers.h"
 
 ALagCompensationGameMode::ALagCompensationGameMode()
@@ -16,4 +17,13 @@ ALagCompensationGameMode::ALagCompensationGameMode()
 
 	// use our custom HUD class
 	HUDClass = ALagCompensationHUD::StaticClass();
+}
+
+UClass* ALagCompensationGameMode::GetDefaultPawnClassForController_Implementation(AController* InController)
+{
+	if(InController->IsLocalController())
+	{
+		return SpectatorClass;
+	}
+	return Super::GetDefaultPawnClassForController_Implementation(InController);
 }

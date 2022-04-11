@@ -28,7 +28,7 @@ ALagCompensationCharacter::ALagCompensationCharacter(const FObjectInitializer& O
 : Super(ObjectInitializer.SetDefaultSubobjectClass<ULCCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
 	// Set size for collision capsule
-	GetCapsuleComponent()->InitCapsuleSize(55.f, 96.0f);
+	GetCapsuleComponent()->InitCapsuleSize(33.f, 96.0f);
 
 	// set our turn rates for input
 	BaseTurnRate = 45.f;
@@ -90,6 +90,8 @@ ALagCompensationCharacter::ALagCompensationCharacter(const FObjectInitializer& O
 
 	// Uncomment the following line to turn motion controllers on by default:
 	//bUsingMotionControllers = true;
+
+	MaxSavedPositionAge = 0.3f;
 }
 
 void ALagCompensationCharacter::BeginPlay()
@@ -112,15 +114,15 @@ void ALagCompensationCharacter::BeginPlay()
 		Mesh1P->SetHiddenInGame(false, true);
 	}
 	
-	GetWorldTimerManager().SetTimer(AutoShootTimer, this, &ALagCompensationCharacter::OnFire, 2.f, true);
+	//GetWorldTimerManager().SetTimer(AutoShootTimer, this, &ALagCompensationCharacter::OnFire, 2.f, true);
 }
 
 void ALagCompensationCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	Super::EndPlay(EndPlayReason);
 
-	GetWorldTimerManager().ClearTimer(AutoShootTimer);
-	AutoShootTimer.Invalidate();
+	//GetWorldTimerManager().ClearTimer(AutoShootTimer);
+	//AutoShootTimer.Invalidate();
 }
 
 void ALagCompensationCharacter::Tick(float DeltaSeconds)
@@ -185,34 +187,69 @@ void ALagCompensationCharacter::SetupPlayerInputComponent(class UInputComponent*
 	PlayerInputComponent->BindAxis("LookUpRate", this, &ALagCompensationCharacter::LookUpAtRate);
 }
 
-bool ALagCompensationCharacter::GetPositionForTime(float Time, FVector& OutPosition)
+void ALagCompensationCharacter::AutoFire()
 {
-	TArray<FSavedPosition> Positions = SavedMoves;
-	UE_LOG(LogTemp, Log, TEXT("%s: Time is %f"), *GetName(), Time);
-	float TargetTime = GetWorld()->GetTimeSeconds() - Time;
-	
-	if(Positions.Num() <= 0)
+	OnFire();
+}
+
+bool ALagCompensationCharacter::GetPositionForTime(float PredictionTime, FVector& OutPosition)
+{
+	FVector TargetLocation = GetActorLocation();
+	FVector PrePosition = GetActorLocation();
+	FVector PostPosition = GetActorLocation();
+	float TargetTime = GetWorld()->GetTimeSeconds() - PredictionTime;
+	float Percent = 0.999f;
+	bool bTeleported = false;
+	if (PredictionTime > 0.f)
 	{
-		UE_LOG(LogTemp, Log, TEXT("%s: No SavedMoves"), *GetName());
-		return false;
+		for (int32 i = SavedMoves.Num() - 1; i >= 0; i--)
+		{
+			TargetLocation = SavedMoves[i].Position;
+			if (SavedMoves[i].Time < TargetTime)
+			{
+				if (!SavedMoves[i].bTeleported && (i<SavedMoves.Num() - 1))
+				{
+					PrePosition = SavedMoves[i].Position;
+					PostPosition = SavedMoves[i + 1].Position;
+					if (SavedMoves[i + 1].Time == SavedMoves[i].Time)
+					{
+						Percent = 1.f;
+						TargetLocation = SavedMoves[i + 1].Position;
+					}
+					else
+					{
+						Percent = (TargetTime - SavedMoves[i].Time) / (SavedMoves[i + 1].Time - SavedMoves[i].Time);
+						TargetLocation = SavedMoves[i].Position + Percent * (SavedMoves[i + 1].Position - SavedMoves[i].Position);
+					}
+				}
+				else
+				{
+					bTeleported = SavedMoves[i].bTeleported;
+				}
+				break;
+			}
+		}
 	}
-	
-	//Time we are looking for is 
-	for ( int i = Positions.Num() - 1; i > 0; --i)
+	OutPosition = TargetLocation;
+	return true;
+}
+
+void ALagCompensationCharacter::PositionUpdated()
+{
+	const float WorldTime = GetWorld()->GetTimeSeconds();
+	ULCCharacterMovementComponent* MovementComponent = Cast<ULCCharacterMovementComponent>(GetMovementComponent());
+	if (GetCharacterMovement())
 	{
-			if(Positions[i].Time > TargetTime)
-			{
-				continue;
-			}
-			if(Positions[i].Time <= TargetTime)
-			{
-				OutPosition = Positions[i].Position;
-				UE_LOG(LogTemp, Log, TEXT("%s: i = %d"), *GetName(), i);
-				return true;
-			}
-		
+		new(SavedMoves)FSavedPosition(GetActorLocation(), GetViewRotation(),
+			GetCharacterMovement()->Velocity, GetCharacterMovement()->bJustTeleported, false,
+			WorldTime, (MovementComponent ? MovementComponent->GetCurrentSynchTime() : 0.f));
 	}
-	return false;
+
+	// maintain one position beyond MaxSavedPositionAge for interpolation
+	if (SavedMoves.Num() > 1 && SavedMoves[1].Time < WorldTime - MaxSavedPositionAge)
+	{
+		SavedMoves.RemoveAt(0);
+	}
 }
 
 void ALagCompensationCharacter::OnFire()
@@ -231,12 +268,30 @@ void ALagCompensationCharacter::OnFire()
 			}
 			else
 			{
+					const FRotator SpawnRotation = GetControlRotation();
+            		// MuzzleOffset is in camera space, so transform it to world space before offsetting from the character location to find the final muzzle position
+            		const FVector StartLocation = ((FirstPersonCameraComponent != nullptr) ? FirstPersonCameraComponent->GetComponentLocation() : GetActorLocation()) + SpawnRotation.RotateVector(GunOffset);
+            		FVector_NetQuantize EndLocation = StartLocation + (SpawnRotation.Vector() * 5000.f);
+            		
+            		const FName TraceTag("LineTraceTag");
+            		World->DebugDrawTraceTag = TraceTag;
+                            
+            		FCollisionQueryParams CollisionParams = FCollisionQueryParams::DefaultQueryParam;
+            		CollisionParams.TraceTag = TraceTag;
+            		FHitResult OutHit;
+            				
+            		TArray<AActor*> ActorsToIgnore;
+            		ActorsToIgnore.Empty();
+            		//GetWorld()->LineTraceSingleByChannel(OutHit, StartLocation, EndLocation, ECC_Visibility, CollisionParams);
+            		bool bHitOccured = UKismetSystemLibrary::LineTraceSingle(GetWorld(), StartLocation, EndLocation, ETraceTypeQuery::TraceTypeQuery1,
+            			false, ActorsToIgnore, EDrawDebugTrace::ForDuration, OutHit, true);
+			
 				ALagCompensationPlayerController* LCPC = GetOwner() ? Cast<ALagCompensationPlayerController>(GetController()) : NULL;
 				float PredictionTime = LCPC ? LCPC->GetPredictionTime() : 0.f;
 				UE_LOG(LogTemp, Log, TEXT("%s: %e"), *GetName(), PredictionTime);
 				float CurrentClientTime = GetWorld()->GetTimeSeconds();
 				
-				if(GetLocalRole() == ROLE_AutonomousProxy)
+				if(GetLocalRole() == ROLE_AutonomousProxy || GetLocalRole() == ROLE_Authority && IsLocallyControlled())
 				{
 					OnFire_Server(PredictionTime);
 				}
@@ -300,13 +355,7 @@ void ALagCompensationCharacter::OnFire_Server_Implementation(float ClientFireTim
 		TArray<AActor*> ActorsToIgnore;
 		ActorsToIgnore.Empty();
 		//GetWorld()->LineTraceSingleByChannel(OutHit, StartLocation, EndLocation, ECC_Visibility, CollisionParams);
-		bool bHitOccured = UKismetSystemLibrary::LineTraceSingle(GetWorld(), StartLocation, EndLocation, ETraceTypeQuery::TraceTypeQuery1,
-			false, ActorsToIgnore, EDrawDebugTrace::ForDuration, OutHit, true);
 
-		if(bHitOccured)
-		{
-			EndLocation = OutHit.Location;
-		}
 
 		DrawDebugSphere(GetWorld(), OutHit.Location, 10.f, 12, FColor::Orange, false, 1.f);
 
@@ -317,10 +366,10 @@ void ALagCompensationCharacter::OnFire_Server_Implementation(float ClientFireTim
 		for (TActorIterator<ALagCompensationCharacter> ActorItr(GetWorld()); ActorItr; ++ActorItr)
 		{
 			ALagCompensationCharacter* LCChar = *ActorItr;
-			if(LCChar->IsLocallyControlled()) continue; //skip local controller
 			bPositionFound = LCChar->GetPositionForTime(ClientFireTime, ClientViewPosition);
 			if(bPositionFound)
 			{
+				FVector NormalPosition = LCChar->GetActorLocation();
 				UCapsuleComponent* ActorCapsule = LCChar->GetCapsuleComponent();
 				//LCChar->SetActorLocation(ClientViewPosition);
 				
