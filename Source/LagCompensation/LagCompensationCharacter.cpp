@@ -110,7 +110,12 @@ void ALagCompensationCharacter::BeginPlay()
 		Mesh1P->SetHiddenInGame(false, true);
 	}
 
-	AActor* TestCapsuleActor = GetWorld()->SpawnActor(AFakeCharacterCapsule::StaticClass());
+	const FVector SpawnLocation = FVector(5000.f, 5000.f, 0.f);
+	const FRotator SpawnRotation = FRotator::ZeroRotator;
+	FActorSpawnParameters Parms;
+	Parms.Owner = this;
+	Parms.Instigator = this;
+	AActor* TestCapsuleActor = GetWorld()->SpawnActor(AFakeCharacterCapsule::StaticClass(), &SpawnLocation, &SpawnRotation, Parms);
 	TestCapsule = TestCapsuleActor? Cast<AFakeCharacterCapsule>(TestCapsuleActor) : nullptr;
 }
 
@@ -122,27 +127,6 @@ void ALagCompensationCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason
 void ALagCompensationCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	
-	if(GetLocalRole() == ROLE_AutonomousProxy)
-	{
-		UCharacterMovementComponent* MovementComponent = Cast<UCharacterMovementComponent>(GetMovementComponent());
-		FNetworkPredictionData_Client_Character* Data = MovementComponent->GetPredictionData_Client_Character();
-		for (auto SavedMove : Data->SavedMoves)
-		{
-			//PrintSavedMove(SavedMove);
-			//DrawDebugMove(SavedMove);
-		}
-	}
-}
-
-void ALagCompensationCharacter::PrintSavedMove(FSavedMovePtr Move)
-{
-	UE_LOG(LogTemp, Log, TEXT("%s: TimeStamp: %f, \n DeltaTime: %f, \n StartLocation: %s"),\
-	*GetName(),
-	Move->TimeStamp,
-	Move->DeltaTime,
-	*Move->StartLocation.ToString()
-	);
 }
 
 void ALagCompensationCharacter::DrawDebugMove(FSavedMovePtr Move)
@@ -211,17 +195,6 @@ void ALagCompensationCharacter::FindClosestPosition(FVector Position)
 	FVector ClosestPosition = Position - 1000.f;
 	int ClosestPositionIndex = 0;
 	float MinDistance = 10000000000000;
-	float Time = 0.f;
-
-	
-	UE_LOG(LogTemp, Log, TEXT(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"));
-	UE_LOG(LogTemp, Log, TEXT("TargetPosition: %s"), *Position.ToString());
-	UE_LOG(LogTemp, Log, TEXT(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"));
-	for (int32 i = SavedMoves.Num() - 1; i >= 0; i--) {
-		UE_LOG(LogTemp, Log, TEXT("[%d] => %s"), i, *SavedMoves[i].Position.ToString());
-	}
-	UE_LOG(LogTemp, Log, TEXT(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"));
-	
 	
 	for (int32 i = SavedMoves.Num() - 1; i >= 0; i--)
 	{
@@ -230,7 +203,6 @@ void ALagCompensationCharacter::FindClosestPosition(FVector Position)
 			MinDistance = FVector::Dist(SavedMoves[i].Position, Position);
 			ClosestPositionIndex = i;
 			ClosestPosition = SavedMoves[i].Position;
-			Time = SavedMoves[i].Time;
 		}
 	}
 	UE_LOG(LogTemp, Log, TEXT("TargetPosition: %s"), *ClosestPosition.ToString());
@@ -244,19 +216,9 @@ void ALagCompensationCharacter::GetPositionForTime(float PredictionTime, FVector
 	float Percent = 0.999f;
 	if (PredictionTime > 0.f)
 	{
-		
-		UE_LOG(LogTemp, Log, TEXT(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"));
-		UE_LOG(LogTemp, Log, TEXT("TargetTime: %f"), TargetTime);
-		UE_LOG(LogTemp, Log, TEXT(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"));
-		for (int32 i = SavedMoves.Num() - 1; i >= 0; i--) {
-			//UE_LOG(LogTemp, Log, TEXT("[%d] => %f"), i, SavedMoves[i].Time);
-			//DrawDebugCapsule(GetWorld(), SavedMoves[i].Position, 96.f, 33.f, FQuat::Identity, FColor::Red, true);;
-			//DrawDebugSphere(GetWorld(), SavedMoves[i].Position, 5.f, 12, FColor::Red, true);
-		}
-		UE_LOG(LogTemp, Log, TEXT(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"));
-		
 		for (int32 i = SavedMoves.Num() - 1; i >= 0; i--)
 		{
+			//DrawDebugSphere(GetWorld(), SavedMoves[i].Position, 5.f, 12, FColor::Red, true);
 			TargetLocation = SavedMoves[i].Position;
 			if (SavedMoves[i].Time < TargetTime)
 			{
@@ -265,14 +227,12 @@ void ALagCompensationCharacter::GetPositionForTime(float PredictionTime, FVector
 					if (SavedMoves[i + 1].Time == SavedMoves[i].Time)
 					{
 						TargetLocation = SavedMoves[i + 1].Position;
-						UE_LOG(LogTemp, Log, TEXT("%s: Location found at i = %d (%d i's overall count). Time is %f"), *GetName(), i, SavedMoves.Num(), SavedMoves[i + 1].Time);
 					}
 					else
 					{
 						Percent = (TargetTime - SavedMoves[i].Time) / (SavedMoves[i + 1].Time - SavedMoves[i].Time);
 						TargetLocation = SavedMoves[i].Position + Percent * (SavedMoves[i + 1].Position - SavedMoves[i].Position);
-						//TargetLocation = (SavedMoves[i].Position + SavedMoves[i + 1].Position) / 2.0f;
-						UE_LOG(LogTemp, Log, TEXT("%s: Location found at i = %d + %f percents (%d i's overall count). Time is %f"), *GetName(), i, Percent, SavedMoves.Num(), SavedMoves[i].Time + Percent * (SavedMoves[i + 1].Time - SavedMoves[i].Time));
+						//UE_LOG(LogTemp, Log, TEXT("%s: Location found at i = %d + %f percents (%d i's overall count). Time is %f"), *GetName(), i, Percent, SavedMoves.Num(), SavedMoves[i].Time + Percent * (SavedMoves[i + 1].Time - SavedMoves[i].Time));
 					}
 				}
 				break;
@@ -305,14 +265,13 @@ void ALagCompensationCharacter::OnFire()
 	UWorld* const World = GetWorld();
 	if (World != nullptr)
 	{
-		//getting prediction time based on a half-RTT and some restraining constants
+		//getting prediction time based on the RTT and some restraining constants
 		ALagCompensationPlayerController* LagCompensationPC = GetOwner() ? Cast<ALagCompensationPlayerController>(GetController()) : nullptr;
 		float PredictionTime = LagCompensationPC ? LagCompensationPC->GetPredictionTime() : 0.f;
 		
 		UE_LOG(LogTemp, Log, TEXT("%s's PredictionTime is %e"), *GetName(), PredictionTime);
 		
 		const FRotator Rotation = GetControlRotation();
-        // MuzzleOffset is in camera space, so transform it to world space before offsetting from the character location to find the final muzzle position
         const FVector StartLocation = ((FirstPersonCameraComponent != nullptr) ? FirstPersonCameraComponent->GetComponentLocation() : GetActorLocation()) + Rotation.RotateVector(GunOffset);
         FVector_NetQuantize EndLocation = StartLocation + (Rotation.Vector() * 10000.f);
 		
@@ -326,25 +285,12 @@ void ALagCompensationCharacter::OnFire()
 		UKismetSystemLibrary::LineTraceSingle(GetWorld(), StartLocation, EndLocation, ETraceTypeQuery::TraceTypeQuery1,
             false, ActorsToIgnore, EDrawDebugTrace::ForDuration, OutHit, true);
 		
-		ALagCompensationCharacter* HitCharacter = nullptr;
-		bool bHitRegistered = false;
-		if(GetLocalRole() == ROLE_AutonomousProxy)
-		{
-			AActor* HitActor = OutHit.Actor.Get();
-			HitCharacter = HitActor? Cast<ALagCompensationCharacter>(HitActor) : nullptr;
-			
-			if(HitCharacter)
-			{
-				bHitRegistered = true;
-				UE_LOG(LogTemp, Log, TEXT("%s: Client: Hit"), *GetName());
-				//DrawDebugCapsule(GetWorld(), HitActor->GetActorLocation(), GetCapsuleComponent()->GetScaledCapsuleHalfHeight(), 33.f, FQuat::Identity, FColor::Yellow, true);
-			}
-		}
+		ALagCompensationCharacter* HitCharacter = OutHit.Actor.Get() ? Cast<ALagCompensationCharacter>(OutHit.Actor.Get()) : nullptr;
 		
 		if(GetLocalRole() == ROLE_AutonomousProxy || GetLocalRole() == ROLE_Authority && IsLocallyControlled())
 		{
 			OnFire_Server(PredictionTime, StartLocation, EndLocation, Cast<ALagCompensationPlayerController>(this->GetController()),
-				bHitRegistered, HitCharacter, HitCharacter ? HitCharacter->GetActorLocation() : FVector::ZeroVector);
+				HitCharacter, HitCharacter ? HitCharacter->GetActorLocation() : FVector::ZeroVector);
 		}
 	}
 
@@ -367,14 +313,14 @@ void ALagCompensationCharacter::OnFire()
 }
 
 void ALagCompensationCharacter::OnFire_Server_Implementation(float PredictionAmount, FVector StartLocation,
-	FVector EndLocation, ALagCompensationPlayerController* FireInitiator, bool bClientHit,
-	ALagCompensationCharacter* Victim, FVector ClientPosition)
+	FVector EndLocation, ALagCompensationPlayerController* FireInitiator, ALagCompensationCharacter* Victim,
+	FVector ClientPosition)
 {
 	UWorld* const World = GetWorld();
 	if (World != nullptr)
 	{
 		float CurrentTime = World->GetTimeSeconds();
-		UE_LOG(LogTemp, Log, TEXT("%s: TimeStamp5: Client fired in %f \n TimeStamp5: Now is %f"), *GetName(), CurrentTime - PredictionAmount, CurrentTime);
+		UE_LOG(LogTemp, Log, TEXT("%s: \nTimeStamp5: Client fired in %f, now is %f, diff: %f"), *GetName(), CurrentTime - PredictionAmount, CurrentTime, PredictionAmount);
 
 		FHitResult OutHit;
 		
@@ -384,63 +330,68 @@ void ALagCompensationCharacter::OnFire_Server_Implementation(float PredictionAmo
 		FVector ClientRewoundPosition;
 
 		bool bPositionFound = false;
+		bool bClientHit = IsValid(Victim);
 		for (TActorIterator<ALagCompensationCharacter> ActorItr(World); ActorItr; ++ActorItr)
 		{
-			//if((*ActorItr) != Victim) continue;
 			//get the rewind position of a player
 			(*ActorItr)->GetPositionForTime(PredictionAmount, ClientRewoundPosition, FireInitiator);
-			if(ClientPosition != FVector::ZeroVector)
+
+			/*
+			if(bClientHit && (*ActorItr) == Victim)
 			{
-				UE_LOG(LogTemp, Log, TEXT("%s: FindClosestPosition called"), *GetName());
 				(*ActorItr)->FindClosestPosition(ClientPosition);
 			}
-			
-			UCapsuleComponent* ActorCapsule = (*ActorItr)->GetCapsuleComponent();
-			FVector CurrentCapsuleLocation = ActorCapsule->GetComponentLocation();
+			*/
 
 			//put a capsule in the rewind position of a player
 			//TestCapsule->SetActorLocation(CurrentCapsuleLocation);
-			TestCapsule->SetActorLocation(ClientRewoundPosition);
-
-			//fire a trace from a given spot (yup the player can cheat here. checking against the current muzzle
-			//location could help)
-			bool bHitOccurred = UKismetSystemLibrary::LineTraceSingle(GetWorld(), StartLocation, EndLocation, ETraceTypeQuery::TraceTypeQuery1,
-		false, ActorsToIgnore, EDrawDebugTrace::ForDuration, OutHit, true);
-
-			bool ServerRegisterHit = bHitOccurred && (Cast<AFakeCharacterCapsule>(OutHit.Actor) /*|| OutHit.Actor == *ActorItr*/);
-			if(ServerRegisterHit)
-			{
-				//we hit something and it's our Player or a FakeCapsule representing the player's rewound position!
-				//draw a sphere to represent hit location
-				//then draw two capsules:
-				// * first is a player's current position on the server (Painted Black)
-				// * second is a player's position _on the firing client_ at the time the shot was fired (Painted White)
-				
-				//DrawDebugSphere(GetWorld(), OutHit.Location, 5.f, 12, FColor::Orange, true);
-
-				UE_LOG(LogTemp, Log, TEXT("%s: Server: Hit"), *GetName());
-				DrawDebugCapsule(GetWorld(), ClientPosition, 96.f + 20.f, 33.f, FQuat::Identity, FColor::Blue, true);
-				DrawDebugRewind(CurrentCapsuleLocation, ClientRewoundPosition, ActorCapsule->GetScaledCapsuleHalfHeight(), OutHit.Location, StartLocation, EndLocation);
-				ClientDrawDebugRewind(CurrentCapsuleLocation, ClientRewoundPosition, ActorCapsule->GetScaledCapsuleHalfHeight(), OutHit.Location, StartLocation, EndLocation);
-				ClientDrawDebugCapsule(ClientPosition, (*ActorItr)->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 20, FColor::Yellow);
-				
-			}
-			
-			if((*ActorItr) == Victim && bClientHit && !(ServerRegisterHit))
-			{
-				if(bHitOccurred)
-				{
-					UE_LOG(LogTemp, Log, TEXT("%s: HitName %s"), *GetName(), *OutHit.Actor.Get()->GetName());
-				}
-				//ClientDrawDebugRewind(CurrentCapsuleLocation, ClientRewoundPosition, ActorCapsule->GetScaledCapsuleHalfHeight(), OutHit.Location, StartLocation, EndLocation);
-				//ClientDrawDebugCapsule(ClientPosition, (*ActorItr)->GetCapsuleComponent()->GetScaledCapsuleHalfHeight(), FColor::Yellow);
-			}
-
-			TestCapsule->SetActorLocation(FVector(5000.f, 5000.f, 0.f));
+			(*ActorItr)->TestCapsule->SetActorLocation(ClientRewoundPosition);
+			ActorsToIgnore.Add(*ActorItr);
 		}
+		
 
 		
-		//UE_LOG(LogTemp, Log, TEXT("Client hit %s at %f. In that time we have the enemy's position marked white. Client has yellow"), );
+		//fire a trace from a given spot (yup the player can cheat here. checking against the current muzzle
+		//location could help)
+		bool bHitOccurred = UKismetSystemLibrary::LineTraceSingle(GetWorld(), StartLocation, EndLocation, ETraceTypeQuery::TraceTypeQuery1,
+	false, ActorsToIgnore, EDrawDebugTrace::ForDuration, OutHit, true);
+
+		ALagCompensationCharacter* HitActor = (Cast<ALagCompensationCharacter>(OutHit.Actor.Get()->GetOwner()));
+		
+		bool ServerRegisterHit = bHitOccurred && HitActor;
+		
+		if(ServerRegisterHit)
+		{
+			//we hit something and it's a FakeCapsule representing the player's rewound position!
+			
+			UCapsuleComponent* ActorCapsule = HitActor->GetCapsuleComponent();
+			FVector CurrentCapsuleLocation = ActorCapsule ? ActorCapsule->GetComponentLocation() : HitActor->GetActorLocation();
+			float ActorCapsuleHalfHeight = ActorCapsule ? ActorCapsule->GetScaledCapsuleHalfHeight() : 96.f;
+
+			FVector HitRewoundPostion = HitActor->GetActorLocation();
+
+			if(!bClientHit)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("%s: Server: Due to an inconsistent nature of network delays we hit %s on the SERVER but missed on the CLIENT"), *GetName(), *OutHit.Actor.Get()->GetName());
+			}
+				
+			DrawDebugCapsule(GetWorld(), ClientPosition, ActorCapsuleHalfHeight + 20.f, 33.f, FQuat::Identity, FColor::Blue, true);
+			DrawDebugRewind(CurrentCapsuleLocation, HitRewoundPostion, ActorCapsuleHalfHeight, OutHit.Location, StartLocation, EndLocation);
+				
+			ClientDrawDebugCapsule(ClientPosition, ActorCapsuleHalfHeight + 20, FColor::Yellow);
+			ClientDrawDebugRewind(CurrentCapsuleLocation, HitRewoundPostion, ActorCapsuleHalfHeight, OutHit.Location, StartLocation, EndLocation);
+				
+		}
+			
+		if((HitActor) == Victim && bClientHit && !(ServerRegisterHit) && bHitOccurred)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: Server: Due to an inconsistent nature of network delays we hit %s on CLIENT but missed on the SERVER"), *GetName(), *Victim->GetName());
+		}
+
+		for (TActorIterator<ALagCompensationCharacter> ActorItr(World); ActorItr; ++ActorItr)
+		{
+			TestCapsule->SetActorLocation(FVector(5000.f, 5000.f, 0.f));
+		}
 	}
 }
 

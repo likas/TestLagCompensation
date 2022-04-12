@@ -97,7 +97,6 @@ protected:
 
 	virtual void Tick(float DeltaSeconds) override;
 	
-	void PrintSavedMove(FSavedMovePtr Move);
 	void DrawDebugMove(FSavedMovePtr Move);
 
 public:
@@ -143,8 +142,8 @@ protected:
 	void OnFire();
 	
 	UFUNCTION(Server, Unreliable)
-	void OnFire_Server(float PredictionAmount, FVector StartLocation, FVector EndLocation, ALagCompensationPlayerController* FireInitiator, bool bClientHit, ALagCompensationCharacter* Victim, FVector ClientPosition);
-	void OnFire_Server_Implementation(float PredictionAmount, FVector StartLocation, FVector EndLocation, ALagCompensationPlayerController* FireInitiator, bool bClientHit, ALagCompensationCharacter* Victim, FVector ClientPosition);
+	void OnFire_Server(float PredictionAmount, FVector StartLocation, FVector EndLocation, ALagCompensationPlayerController* FireInitiator, ALagCompensationCharacter* Victim, FVector ClientPosition);
+	void OnFire_Server_Implementation(float PredictionAmount, FVector StartLocation, FVector EndLocation, ALagCompensationPlayerController* FireInitiator, ALagCompensationCharacter* Victim, FVector ClientPosition);
 
 	/** Resets HMD orientation and position in VR. */
 	void OnResetVR();

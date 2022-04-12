@@ -10,6 +10,7 @@
 ALagCompensationPlayerController::ALagCompensationPlayerController(const class FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
+	MaxPing = 200.f;
 	PredictionFudgeFactor = 0.f;
 }
 
@@ -34,7 +35,7 @@ void ALagCompensationPlayerController::Tick(float DeltaSeconds)
 float ALagCompensationPlayerController::GetPredictionTime()
 {
 	// exact ping is in msec, divide by 1000 to get time in seconds
-	return (PlayerState && (GetNetMode() != NM_Standalone)) ? (0.001f*FMath::Clamp(GetPlayerState<APlayerState>()->ExactPing - PredictionFudgeFactor, 0.f, 200.f)) : 0.f;
+	return (PlayerState && (GetNetMode() != NM_Standalone)) ? (0.001f*FMath::Clamp(GetPlayerState<APlayerState>()->ExactPing - PredictionFudgeFactor, 0.f, MaxPing)) : 0.f;
 }
 
 void ALagCompensationPlayerController::ClientDebugRewind_Implementation(FVector_NetQuantize TargetLocation,

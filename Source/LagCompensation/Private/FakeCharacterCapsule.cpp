@@ -14,7 +14,7 @@ AFakeCharacterCapsule::AFakeCharacterCapsule(const FObjectInitializer& ObjectIni
 	SomeCapsule = CreateDefaultSubobject<UCapsuleComponent>(TEXT("Capsule"));
 
 	SomeCapsule->InitCapsuleSize(33.f, 96.f);
-	SomeCapsule->SetVisibility(true);
+	SomeCapsule->SetVisibility(false);
 	SomeCapsule->SetHiddenInGame(false);
 	SomeCapsule->SetCollisionProfileName("OverlapOnlyPawn");
 

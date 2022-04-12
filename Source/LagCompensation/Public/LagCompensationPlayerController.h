@@ -24,6 +24,9 @@ public:
 	/** Return amount of time to tick or simulate to make up for network lag */
 	virtual float GetPredictionTime();
 
+	UPROPERTY(BlueprintReadOnly, Category=Network, Replicated)
+	float MaxPing;
+
 	// Perceived latency reduction
 	/** Used to correct prediction error. */
 	UPROPERTY(EditAnywhere, Replicated, Category=Network)
