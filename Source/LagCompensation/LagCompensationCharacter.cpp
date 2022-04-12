@@ -368,7 +368,7 @@ void ALagCompensationCharacter::OnFire_Server_Implementation(float PredictionAmo
 			FVector CurrentCapsuleLocation = ActorCapsule ? ActorCapsule->GetComponentLocation() : HitActor->GetActorLocation();
 			float ActorCapsuleHalfHeight = ActorCapsule ? ActorCapsule->GetScaledCapsuleHalfHeight() : 96.f;
 
-			FVector HitRewoundPostion = HitActor->GetActorLocation();
+			FVector HitRewoundPostion = OutHit.Actor.Get()->GetActorLocation();
 
 			if(!bClientHit)
 			{
