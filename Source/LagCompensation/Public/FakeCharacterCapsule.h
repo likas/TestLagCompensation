@@ -17,7 +17,7 @@ class LAGCOMPENSATION_API AFakeCharacterCapsule : public AActor
 	
 public:	
 	// Sets default values for this actor's properties
-	AFakeCharacterCapsule(const class FObjectInitializer& PCIP);
+	AFakeCharacterCapsule(const FObjectInitializer& ObjectInitializer);
 
 protected:
 	// Called when the game starts or when spawned

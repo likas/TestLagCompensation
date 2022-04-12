@@ -13,8 +13,7 @@ UCLASS()
 class LAGCOMPENSATION_API ULCCharacterMovementComponent : public UCharacterMovementComponent
 {
 	GENERATED_BODY()
-
-	virtual void ServerMove_PerformMovement(const FCharacterNetworkMoveData& MoveData) override;
+	
 	float GetCurrentMovementTime() const;
 	
 public:

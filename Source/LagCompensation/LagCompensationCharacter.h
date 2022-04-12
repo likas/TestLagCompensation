@@ -8,6 +8,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "LagCompensationCharacter.generated.h"
 
+class ALagCompensationPlayerController;
 class UInputComponent;
 class USkeletalMeshComponent;
 class USceneComponent;
@@ -21,9 +22,9 @@ struct FSavedPosition
 {
 	GENERATED_USTRUCT_BODY()
 
-	FSavedPosition() : Position(FVector(0.f)), Rotation(FRotator(0.f)), Velocity(FVector(0.f)), bTeleported(false), bShotSpawned(false), Time(0.f), TimeStamp(0.f) {};
+	FSavedPosition() : Position(FVector(0.f)), Rotation(FRotator(0.f)), bTeleported(false), Time(0.f), TimeStamp(0.f) {};
 
-	FSavedPosition(FVector InPos, FRotator InRot, FVector InVel, bool InTeleported, bool InShotSpawned, float InTime, float InTimeStamp) : Position(InPos), Rotation(InRot), Velocity(InVel), bTeleported(InTeleported), bShotSpawned(InShotSpawned), Time(InTime), TimeStamp(InTimeStamp) {};
+	FSavedPosition(FVector InPos, FRotator InRot, bool InTeleported, float InTime, float InTimeStamp) : Position(InPos), Rotation(InRot), bTeleported(InTeleported), Time(InTime), TimeStamp(InTimeStamp) {};
 
 	/** Position of player at time Time. */
 	UPROPERTY()
@@ -33,17 +34,9 @@ struct FSavedPosition
 	UPROPERTY()
 	FRotator Rotation;
 
-	/** Keep velocity also for bots to use in realistic reaction time based aiming error model. */
-	UPROPERTY()
-	FVector Velocity;
-
 	/** true if teleport occurred getting to current position (so don't interpolate) */
 	UPROPERTY()
 	bool bTeleported;
-
-	/** true if shot was spawned at this position */
-	UPROPERTY()
-	bool bShotSpawned;
 
 	/** Current server world time when this position was updated. */
 	float Time;
@@ -139,7 +132,8 @@ public:
 	UPROPERTY()
 	TArray<FSavedPosition> SavedMoves;
 
-	bool GetPositionForTime(float Time, FVector& OutPosition);
+	void FindClosestPosition(FVector Position);
+	void GetPositionForTime(float Time, FVector& OutPosition, ALagCompensationPlayerController* DebugViewer);
 
 	virtual void PositionUpdated();
 
@@ -149,8 +143,8 @@ protected:
 	void OnFire();
 	
 	UFUNCTION(Server, Unreliable)
-	void OnFire_Server(float PredictionAmount, FVector StartLocation, FVector EndLocation);
-	void OnFire_Server_Implementation(float PredictionAmount, FVector StartLocation, FVector EndLocation);
+	void OnFire_Server(float PredictionAmount, FVector StartLocation, FVector EndLocation, ALagCompensationPlayerController* FireInitiator, bool bClientHit, ALagCompensationCharacter* Victim, FVector ClientPosition);
+	void OnFire_Server_Implementation(float PredictionAmount, FVector StartLocation, FVector EndLocation, ALagCompensationPlayerController* FireInitiator, bool bClientHit, ALagCompensationCharacter* Victim, FVector ClientPosition);
 
 	/** Resets HMD orientation and position in VR. */
 	void OnResetVR();
@@ -189,6 +183,16 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 	void AutoFire();
+
+	void DrawDebugRewind(FVector_NetQuantize TargetLocation, FVector_NetQuantize RewindLocation,
+		float TargetCapsuleHeight, FVector HitPoint, FVector StartLocation, FVector EndLocation);
+		
+	UFUNCTION(Client, Unreliable)
+	void ClientDrawDebugRewind(FVector_NetQuantize TargetLocation, FVector_NetQuantize RewindLocation,
+    		float TargetCapsuleHeight, FVector HitPoint, FVector StartLocation, FVector EndLocation);
+
+	UFUNCTION(Client, Unreliable)
+	void ClientDrawDebugCapsule(FVector Location, float HalfHeight, FColor DrawColor);
 
 };
 

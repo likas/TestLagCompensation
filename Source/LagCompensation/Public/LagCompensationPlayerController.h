@@ -26,6 +26,9 @@ public:
 
 	// Perceived latency reduction
 	/** Used to correct prediction error. */
-	UPROPERTY(EditAnywhere, Replicated, GlobalConfig, Category=Network)
+	UPROPERTY(EditAnywhere, Replicated, Category=Network)
 	float PredictionFudgeFactor;
+
+	UFUNCTION(Client, Unreliable)
+		void ClientDebugRewind(FVector_NetQuantize TargetLocation, FVector_NetQuantize RewindLocation, FVector_NetQuantize PrePosition, FVector_NetQuantize PostPosition, float TargetCapsuleHeight, float PredictionTime, float Percent, bool bTeleported);
 };
